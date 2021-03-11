@@ -19,6 +19,7 @@ import Network.Network;
 import Network.NetworkTools;
 import Window.Window;
 import Window.GamePanel;
+import javax.swing.SwingUtilities;
 
 public class NumberRecognition extends GamePanel implements Runnable {
 	private int        tile_size;
@@ -39,11 +40,9 @@ public class NumberRecognition extends GamePanel implements Runnable {
 	private Font main_font = new Font("SanSerif", Font.PLAIN, 12);
 	private Font large_font = new Font("SanSerif", Font.PLAIN, 120);
 
-
 	public static void main(String[] args) {
 		new NumberRecognition();
 	}
-
 
 	public NumberRecognition() {
 		tile_size =    10;
@@ -55,13 +54,11 @@ public class NumberRecognition extends GamePanel implements Runnable {
 		new Window(window_size, "Number Panel", this);
 	}
 
-
 	public void start() {
 		thread = new Thread(this);
 		thread.start();
 		running = true;
 	}
-
 
 	public void run() {
 		/*double[] data = new double[]{};
@@ -72,7 +69,7 @@ public class NumberRecognition extends GamePanel implements Runnable {
 		}*/
 
 		// add mouselistener
-		listener = new Listener();
+		listener = new Listener(this);
 		this.addMouseListener(listener);
 		this.addMouseMotionListener(listener);
 		this.addKeyListener(listener);
@@ -82,7 +79,7 @@ public class NumberRecognition extends GamePanel implements Runnable {
 		try {
 			net = Network.load_network("Number_recognition");
 
-		// if no file was found
+		// if no file was found 
 		} catch (FileNotFoundException e) {
 			System.out.println("No matching network file found.");
 			System.exit(0);
@@ -125,7 +122,6 @@ public class NumberRecognition extends GamePanel implements Runnable {
 		stop();
 	}
 
-
 	public synchronized void stop() {
 		try {
 			thread.join();
@@ -135,7 +131,6 @@ public class NumberRecognition extends GamePanel implements Runnable {
 		}
 	}
 
-
 	private void update() {
 		double[] input = new double[image_size[0] * image_size[1]];
 		for (int i = 0; i < image_size[0]; i ++) {
@@ -144,26 +139,7 @@ public class NumberRecognition extends GamePanel implements Runnable {
 			}
 		}
 		guesses = net.calculate(input);
-		
-
-		if (listener.right_pressed) {
-			image = new double[image_size[0]][image_size[1]];
-			listener.right_pressed = false;
-		}
-		if (listener.number_pressed != -1) {
-			double[] output = new double[10];
-			output[listener.number_pressed] = 1d;
-			net.train(input, output, .3);
-			System.out.println("succesfully trained Network");
-			listener.number_pressed = -1;
-			try {
-				net.save_network("Number_recognition");
-			} catch (Exception e) {
-				e.printStackTrace();
-			}
-		}
 	}
-
 
 	private void render() {
 
@@ -191,6 +167,7 @@ public class NumberRecognition extends GamePanel implements Runnable {
 
 		// display results
 		
+		graphics.setColor(Color.black);
 		graphics.setFont(large_font);
 		FontMetrics metrics = graphics.getFontMetrics();
 		graphics.drawString(Integer.toString(NetworkTools.index_of_highest_value(guesses)), image_size[0] * tile_size + 10, metrics.getAscent() - 30);
@@ -212,80 +189,83 @@ public class NumberRecognition extends GamePanel implements Runnable {
 		buffer_strategy.show();
 	}
 
+	private void clear() {
+		image = new double[image_size[0]][image_size[1]];
+	}
 
-	private class Listener implements MouseListener, MouseMotionListener, KeyListener {
-		public boolean left_pressed;
-		public boolean right_pressed;
-		public int[]   position;
-		public int     number_pressed;
+	private void draw(int[] position) {
+		if (position[0] > image_size[0] * tile_size || position[1] > image_size[1] * tile_size) return;
+		int x = position[0] / tile_size;
+		int y = position[1] / tile_size;
+		double offsetX = ((double) position[0] / tile_size) % 1;
+		double offsetY = ((double) position[1] / tile_size) % 1;
+		for (int i = -2; i < 3; i++) {
+			for (int j = -2; j < 3; j++) {
+				try {
+					image[x + i][y + j] = Math.max(Math.min((1.0 / 3.0) / Math.sqrt(Math.pow(offsetX + i - .5, 2) + Math.pow(offsetY + j - .5, 2)), 1), image[x + i][y + j]);
+				} catch (ArrayIndexOutOfBoundsException e) {}
+			}
+		}
+	}
 
-
-		public Listener() {
-			position = new int[2];
-			number_pressed = -1;
+	private void train(byte number) {
+		double[] input = new double[image_size[0] * image_size[1]];
+		for (int i = 0; i < image_size[0]; i ++) {
+			for (int j = 0; j < image_size[1]; j ++) {
+				input[i * image_size[1] + j] = image[j][i];
+			}
 		}
 
+		double[] output = new double[10];
+		output[number] = 1d;
+		net.train(input, output, .3);
+		System.out.println("succesfully trained Network");
+		try {
+			net.save_network("Number_recognition");
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
 
-		public void keyPressed(KeyEvent event) {
+	private class Listener implements MouseListener, MouseMotionListener, KeyListener {
+		private NumberRecognition panel;
+
+		public Listener(NumberRecognition panel) {
+			this.panel = panel;
+		}
+
+		public void keyTyped(KeyEvent event) {
 			try {
 				int pressed = Character.getNumericValue(event.getKeyChar());
 				if (pressed >= 0 && pressed <= 9) {
-					number_pressed = pressed;
+					panel.train((byte) pressed);
 				}
 			} catch (NumberFormatException e) {}
 		}
 
-
-		public void mousePressed(MouseEvent event) {
-			if (event.getButton() == 1) {
-				left_pressed = true;
-			} else if (event.getButton() == 3) {
-				right_pressed = true;
+		public void mouseClicked(MouseEvent event) {
+			if (event.getButton() == 3) {
+				panel.clear();
 			}
 		}
-
-
-		public void mouseReleased(MouseEvent event) {
-			if (event.getButton() == 1) {
-				left_pressed = false;
-			}
-		}
-
-
-		public void mouseMoved(MouseEvent event) {
-			position[0] = event.getX();
-			position[1] = event.getY();
-			
-		}
-
 
 		public void mouseDragged(MouseEvent event) {
-			position[0] = event.getX();
-			position[1] = event.getY();
-
-			if (position[0] > 0 && position[1] > 0 && position[0] <= image_size[0] * tile_size) {
-			int x = (position[0] / tile_size);
-			int y = (position[1] / tile_size);
-			for (int i = x - 2; i < x + 3; i ++) {
-				for (int j = y - 2; j < y + 3; j ++) {
-					if (i >= 0 && j >= 0 && i < image_size[0] && j < image_size[1])
-					image[i][j] = Math.min(Math.max(3 / Math.sqrt(Math.pow(position[0] - (i + .5) * tile_size, 2) + Math.pow(position[1] - (j + .5) * tile_size, 2)),image[i][j]), 1);
-				}
+			if (SwingUtilities.isRightMouseButton(event)) {
+				panel.clear();
+				return;
 			}
-		}
-		}
-
-
-		public void mouseExited (MouseEvent event) {
-			position[0] = 0;
-			position[1] = 0;
-			left_pressed = false;
+			panel.draw(new int[]{event.getX(), event.getY()});
 		}
 
-
-		public void mouseClicked(MouseEvent event) {}
+		public void mousePressed(MouseEvent event) {
+			if (event.getButton() == 3) return;
+			panel.draw(new int[]{event.getX(), event.getY()});
+		}
+		public void mouseReleased(MouseEvent event) {}
 		public void mouseEntered(MouseEvent event) {}
+		public void mouseExited(MouseEvent event) {}
+		public void mouseMoved(MouseEvent event) {}
 		public void keyReleased(KeyEvent event) {}
-		public void keyTyped   (KeyEvent event) {}
+		public void keyPressed(KeyEvent event) {}
 	}
 }
